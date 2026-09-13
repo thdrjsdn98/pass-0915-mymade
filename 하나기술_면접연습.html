@@ -346,7 +346,7 @@
   </div>
 
   <p class="footer-note">문장 전체를 외우지 말고 키워드만 기억하기<br>1초 침묵 → 두괄식 → 자신 있게 마무리</p>
-  <p class="footer-note" id="versionTag" style="opacity:0.5;">v1.7 · 예시 속도로 듣기(TTS) 추가</p>
+  <p class="footer-note" id="versionTag" style="opacity:0.5;">v1.8 · TTS 정지 버그 + 초기화 순서 버그 수정</p>
 </div>
 
 <script>
@@ -430,7 +430,7 @@ function shuffle(){
 }
 
 function render(){
-  if(window.speechSynthesis) window.speechSynthesis.cancel();
+  if(typeof stopTts === 'function') stopTts();
   const item = data[currentCategory][order[idx]];
   cardTag.textContent = currentCategory;
   cardTime.textContent = item.t ? item.t + '초' : '-';
@@ -517,12 +517,6 @@ document.getElementById('resetBtn').onclick = ()=>{
   updateTimerDisplay();
 };
 
-buildTabs();
-resetOrder();
-render();
-updateTimerDisplay();
-
-// --- Recording + analysis feature ---
 const recordings = {}; // key -> stats
 let mediaRecorder = null;
 let audioChunks = [];
@@ -804,6 +798,7 @@ clearTypeBtn.onclick = ()=>{
 const ttsBtn = document.getElementById('ttsBtn');
 const ttsNote = document.getElementById('ttsNote');
 let koVoice = null;
+let ttsSpeaking = false;
 
 function loadKoVoice(){
   const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
@@ -814,9 +809,19 @@ if(window.speechSynthesis){
   window.speechSynthesis.onvoiceschanged = loadKoVoice;
 }
 
+function stopTts(){
+  if(window.speechSynthesis) window.speechSynthesis.cancel();
+  ttsSpeaking = false;
+  ttsBtn.textContent = '🔊 예시 속도로 듣기';
+}
+
 ttsBtn.onclick = ()=>{
   if(!window.speechSynthesis){
     ttsNote.textContent = '이 브라우저는 음성 재생을 지원하지 않아요.';
+    return;
+  }
+  if(ttsSpeaking){
+    stopTts();
     return;
   }
   window.speechSynthesis.cancel();
@@ -827,11 +832,15 @@ ttsBtn.onclick = ()=>{
   if(koVoice) utter.voice = koVoice;
   utter.rate = 0.85; // slightly slower — deliberate pacing reference
   utter.pitch = 1;
-  ttsBtn.textContent = '⏸ 재생 중...';
-  utter.onend = ()=>{ ttsBtn.textContent = '🔊 예시 속도로 듣기'; };
-  utter.onerror = ()=>{
+  ttsSpeaking = true;
+  ttsBtn.textContent = '⏹ 정지 (재생 중)';
+  utter.onend = ()=>{ ttsSpeaking = false; ttsBtn.textContent = '🔊 예시 속도로 듣기'; };
+  utter.onerror = (e)=>{
+    ttsSpeaking = false;
     ttsBtn.textContent = '🔊 예시 속도로 듣기';
-    ttsNote.textContent = '재생 중 오류가 발생했어요. 다시 시도해보세요.';
+    if(e.error !== 'interrupted' && e.error !== 'canceled'){
+      ttsNote.textContent = '재생 중 오류가 발생했어요. 다시 시도해보세요.';
+    }
   };
   if(!koVoice){
     ttsNote.textContent = '이 기기엔 한국어 음성이 없어서 어색하게 들릴 수 있어요.';
@@ -872,6 +881,12 @@ function renderRecList(){
     el.onclick = ()=>{ delete recordings[el.dataset.key]; renderRecList(); };
   });
 }
+
+// Initial render — placed after all feature declarations to avoid TDZ issues
+buildTabs();
+resetOrder();
+render();
+updateTimerDisplay();
 </script>
 </body>
 </html>
