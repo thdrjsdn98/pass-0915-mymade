@@ -294,7 +294,7 @@
         <span style="font-size:13px;font-weight:700;color:var(--muted);">참고: 표현 유사도</span>
         <span id="matchPct" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:16px;font-weight:700;"></span>
       </div>
-      <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">초록 = 맞춘 단어 · 빨강(취소선) = 다른 단어 (참고용, 위 핵심 내용 체크가 더 중요해요)</p>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">초록 = 맞춘 단어(오타·띄어쓰기·유사표현 허용) · 빨강(취소선) = 다른 단어</p>
       <div id="typeDiff" style="font-size:14px;line-height:1.9;background:var(--bg);border-radius:10px;padding:10px 12px;"></div>
     </div>
   </div>
@@ -330,7 +330,7 @@
   </div>
 
   <p class="footer-note">문장 전체를 외우지 말고 키워드만 기억하기<br>1초 침묵 → 두괄식 → 자신 있게 마무리</p>
-  <p class="footer-note" id="versionTag" style="opacity:0.5;">v1.4 · 핵심 키워드 체크 추가</p>
+  <p class="footer-note" id="versionTag" style="opacity:0.5;">v1.5 · 오타/띄어쓰기/유사표현 허용</p>
 </div>
 
 <script>
@@ -676,12 +676,52 @@ function tokenize(text){
     .filter(Boolean);
 }
 
+// Common formal/informal & phrasing variants treated as equivalent
+const synonymGroups = [
+  ["안녕하세요","안녕하십니까"],
+  ["네","예"],
+  ["말씀드리겠습니다","말하겠습니다","설명드리겠습니다","말씀드립니다"],
+  ["생각합니다","생각해요","생각됩니다","봅니다"],
+  ["회사","업체"],
+  ["근무","일","근무를"],
+  ["담당했습니다","맡았습니다","수행했습니다","진행했습니다"],
+  ["희망합니다","원합니다","바랍니다"],
+  ["가능합니다","됩니다"],
+  ["문제없습니다","괜찮습니다","지장없습니다"],
+];
+const synonymMap = {};
+synonymGroups.forEach((group, gi) => group.forEach(w => synonymMap[w] = gi));
+function canonical(w){ return synonymMap.hasOwnProperty(w) ? synonymMap[w] : null; }
+
+function editDistance(a, b){
+  const dp = Array.from({length:a.length+1}, ()=>new Array(b.length+1).fill(0));
+  for(let i=0;i<=a.length;i++) dp[i][0]=i;
+  for(let j=0;j<=b.length;j++) dp[0][j]=j;
+  for(let i=1;i<=a.length;i++){
+    for(let j=1;j<=b.length;j++){
+      if(a[i-1]===b[j-1]) dp[i][j]=dp[i-1][j-1];
+      else dp[i][j]=1+Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+function wordsMatch(a, b){
+  if(a===b) return true;
+  const ca = canonical(a), cb = canonical(b);
+  if(ca!==null && ca===cb) return true;
+  const maxLen = Math.max(a.length, b.length);
+  if(maxLen<=1) return false;
+  const threshold = maxLen<=3 ? 1 : (maxLen<=6 ? 2 : 3); // more typo tolerance for longer words
+  return editDistance(a,b) <= threshold;
+}
+
 function lcsDiff(target, typed){
   const n = target.length, m = typed.length;
   const dp = Array.from({length:n+1}, ()=>new Array(m+1).fill(0));
   for(let i=1;i<=n;i++){
     for(let j=1;j<=m;j++){
-      if(target[i-1]===typed[j-1]) dp[i][j] = dp[i-1][j-1]+1;
+      if(wordsMatch(target[i-1], typed[j-1])) dp[i][j] = dp[i-1][j-1]+1;
       else dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
     }
   }
@@ -689,7 +729,7 @@ function lcsDiff(target, typed){
   const matched = new Array(n).fill(false);
   let i=n, j=m;
   while(i>0 && j>0){
-    if(target[i-1]===typed[j-1]){ matched[i-1]=true; i--; j--; }
+    if(wordsMatch(target[i-1], typed[j-1])){ matched[i-1]=true; i--; j--; }
     else if(dp[i-1][j] >= dp[i][j-1]) i--;
     else j--;
   }
