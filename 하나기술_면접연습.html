@@ -309,7 +309,7 @@
   </div>
 
   <p class="footer-note">문장 전체를 외우지 말고 키워드만 기억하기<br>1초 침묵 → 두괄식 → 자신 있게 마무리</p>
-  <p class="footer-note" id="versionTag" style="opacity:0.5;">v1.1 · 녹음 분석 + 음성인식</p>
+  <p class="footer-note" id="versionTag" style="opacity:0.5;">v1.2 · 음성인식 오류 메시지 표시</p>
 </div>
 
 <script>
@@ -544,9 +544,25 @@ recBtn.onclick = async ()=>{
             liveTranscript.style.display = 'block';
             liveTranscript.textContent = '인식 중: ' + transcriptText + interim;
           };
-          recognition.onerror = ()=>{ /* silently ignore, timing analysis still works */ };
+          recognition.onerror = (e)=>{
+            liveTranscript.style.display = 'block';
+            liveTranscript.textContent = '⚠ 음성인식 오류: ' + e.error + ' (녹음/타이밍 분석은 계속 진행됩니다)';
+          };
+          recognition.onend = ()=>{
+            if(recording && !transcriptText){
+              liveTranscript.style.display = 'block';
+              liveTranscript.textContent = '⚠ 음성인식이 중간에 종료됐어요 (이 브라우저 미지원이거나 네트워크 문제일 수 있어요)';
+            }
+          };
           recognition.start();
-        }catch(e){ recognitionSupported = false; }
+        }catch(e){
+          recognitionSupported = false;
+          liveTranscript.style.display = 'block';
+          liveTranscript.textContent = '⚠ 이 브라우저는 음성인식을 지원하지 않아요. 녹음/타이밍 분석은 정상 작동해요.';
+        }
+      } else {
+        liveTranscript.style.display = 'block';
+        liveTranscript.textContent = '⚠ 이 브라우저는 음성인식을 지원하지 않아요 (특히 iOS Safari). 녹음/타이밍 분석은 정상 작동해요.';
       }
 
       recording = true;
