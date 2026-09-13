@@ -309,6 +309,7 @@
   </div>
 
   <p class="footer-note">문장 전체를 외우지 말고 키워드만 기억하기<br>1초 침묵 → 두괄식 → 자신 있게 마무리</p>
+  <p class="footer-note" id="versionTag" style="opacity:0.5;">v1.1 · 녹음 분석 + 음성인식</p>
 </div>
 
 <script>
@@ -611,6 +612,12 @@ function fmtTime(sec){
   return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
 }
 
+function escapeHtml(str){
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
 function renderRecList(){
   const keys = Object.keys(recordings);
   recCount.textContent = keys.length;
@@ -627,7 +634,7 @@ function renderRecList(){
     div.className = 'recitem';
     div.innerHTML = `
       <div class="recitem-top">
-        <span class="recitem-q">${r.q}</span>
+        <span class="recitem-q">${escapeHtml(r.q)}</span>
         <span class="recitem-del" data-key="${key}">삭제</span>
       </div>
       <span class="recitem-verdict ${verdictClass}">${verdictText}</span>
@@ -635,7 +642,7 @@ function renderRecList(){
         답변시간 ${fmtTime(r.answerSpan)} ${r.t ? '(목표 '+r.t+'초)' : ''} · 멈춤 ${r.pauseCount}회 · 평균 ${r.avgPause.toFixed(2)}초
         ${r.longPauses>0 ? '<br>⚠ 1초 넘는 멈춤 '+r.longPauses+'회 (버벅임 가능)' : ''}
       </div>
-      ${r.transcript ? '<div style="font-size:12.5px;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;">📝 인식된 내용: '+r.transcript+'</div>' : ''}
+      ${r.transcript ? '<div style="font-size:12.5px;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;">📝 인식된 내용: '+escapeHtml(r.transcript)+'</div>' : ''}
       <audio controls src="${r.url}"></audio>
     `;
     recList.appendChild(div);
