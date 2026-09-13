@@ -209,6 +209,47 @@
     margin-top:22px;
     line-height:1.6;
   }
+  .recitem{
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:12px 14px;
+    background:var(--bg);
+  }
+  .recitem-top{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:6px;
+  }
+  .recitem-q{
+    font-size:13px;
+    font-weight:700;
+    color:var(--ink);
+    max-width:75%;
+  }
+  .recitem-del{
+    font-size:11px;
+    color:var(--muted);
+    cursor:pointer;
+    text-decoration:underline;
+  }
+  .recitem-stats{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12px;
+    margin-bottom:8px;
+  }
+  .recitem-verdict{
+    display:inline-block;
+    font-size:11px;
+    font-weight:700;
+    padding:2px 8px;
+    border-radius:6px;
+    margin-bottom:8px;
+  }
+  .v-good{background:var(--green-light);color:var(--green);}
+  .v-short{background:var(--amber-light);color:var(--amber);}
+  .v-long{background:#FBE3E3;color:#A32D2D;}
+  .recitem audio{width:100%;height:32px;}
 </style>
 </head>
 <body>
@@ -252,12 +293,18 @@
   </div>
 
   <div class="timer-box" id="recBox">
-    <p class="timer-title">녹음해서 들어보기</p>
+    <p class="timer-title">녹음해서 분석하기</p>
     <div class="timer-controls">
       <button class="btn primary" id="recBtn">🎙 녹음 시작</button>
     </div>
     <p id="recStatus" style="font-size:12px;color:var(--muted);text-align:center;margin:10px 0 0;"></p>
     <audio id="recPlayback" controls style="width:100%;margin-top:10px;display:none;"></audio>
+  </div>
+
+  <div class="timer-box" id="recListBox">
+    <p class="timer-title">녹음 기록 (<span id="recCount">0</span>)</p>
+    <p id="recListEmpty" style="font-size:12px;color:var(--muted);text-align:center;margin:4px 0;">아직 분석된 녹음이 없어요</p>
+    <div id="recList" style="display:flex;flex-direction:column;gap:10px;"></div>
   </div>
 
   <p class="footer-note">문장 전체를 외우지 말고 키워드만 기억하기<br>1초 침묵 → 두괄식 → 자신 있게 마무리</p>
@@ -428,13 +475,19 @@ resetOrder();
 render();
 updateTimerDisplay();
 
-// --- Recording feature ---
+// --- Recording + analysis feature ---
+const recordings = {}; // key -> stats
 let mediaRecorder = null;
 let audioChunks = [];
 let recording = false;
 const recBtn = document.getElementById('recBtn');
 const recStatus = document.getElementById('recStatus');
 const recPlayback = document.getElementById('recPlayback');
+const recList = document.getElementById('recList');
+const recCount = document.getElementById('recCount');
+const recListEmpty = document.getElementById('recListEmpty');
+
+function keyFor(cat, i){ return cat + '|' + i; }
 
 recBtn.onclick = async ()=>{
   if(!recording){
@@ -443,11 +496,23 @@ recBtn.onclick = async ()=>{
       audioChunks = [];
       mediaRecorder = new MediaRecorder(stream);
       mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-      mediaRecorder.onstop = ()=>{
+      mediaRecorder.onstop = async ()=>{
         const blob = new Blob(audioChunks, {type:'audio/webm'});
-        recPlayback.src = URL.createObjectURL(blob);
+        const url = URL.createObjectURL(blob);
+        recPlayback.src = url;
         recPlayback.style.display = 'block';
         stream.getTracks().forEach(t=>t.stop());
+        recStatus.textContent = '분석 중...';
+        try{
+          const stats = await analyzeAudio(blob);
+          const item = data[currentCategory][order[idx]];
+          const key = keyFor(currentCategory, order[idx]);
+          recordings[key] = { cat: currentCategory, q: item.q, t: item.t, url, ...stats };
+          renderRecList();
+          recStatus.textContent = '분석 완료! 아래 재생 + 기록에서 확인하세요.';
+        }catch(err){
+          recStatus.textContent = '녹음은 됐는데 분석에 실패했어요. 그래도 재생은 가능해요.';
+        }
       };
       mediaRecorder.start();
       recording = true;
@@ -460,9 +525,90 @@ recBtn.onclick = async ()=>{
     mediaRecorder.stop();
     recording = false;
     recBtn.textContent = '🎙 녹음 시작';
-    recStatus.textContent = '녹음 완료! 아래에서 재생해보세요.';
   }
 };
+
+async function analyzeAudio(blob){
+  const arrayBuffer = await blob.arrayBuffer();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AudioCtx();
+  const buf = await ctx.decodeAudioData(arrayBuffer);
+  const data = buf.getChannelData(0);
+  const sr = buf.sampleRate;
+  const frameSec = 0.02;
+  const frameSize = Math.floor(sr * frameSec);
+  const frames = Math.floor(data.length / frameSize);
+  const rmsThreshold = 0.0316; // ~ -30dB
+  const minSilenceFrames = Math.ceil(0.15 / frameSec);
+
+  let segments = [];
+  let curStart = null, curLen = 0;
+  for(let f=0; f<frames; f++){
+    let sum = 0;
+    const start = f*frameSize;
+    for(let i=0;i<frameSize;i++){ const v = data[start+i]; sum += v*v; }
+    const rms = Math.sqrt(sum/frameSize);
+    if(rms < rmsThreshold){
+      if(curStart===null) curStart = f;
+      curLen++;
+    } else {
+      if(curStart!==null && curLen>=minSilenceFrames) segments.push([curStart*frameSec, (curStart+curLen)*frameSec]);
+      curStart = null; curLen = 0;
+    }
+  }
+  if(curStart!==null && curLen>=minSilenceFrames) segments.push([curStart*frameSec, (curStart+curLen)*frameSec]);
+
+  const total = buf.duration;
+  let lead = 0, trail = 0;
+  let mid = segments.slice();
+  if(mid.length && mid[0][0] < 0.05){ lead = mid[0][1]-mid[0][0]; mid.shift(); }
+  if(mid.length && Math.abs(mid[mid.length-1][1]-total) < 0.05){ trail = mid[mid.length-1][1]-mid[mid.length-1][0]; mid.pop(); }
+  const midTotal = mid.reduce((a,s)=>a+(s[1]-s[0]),0);
+  const answerSpan = total - lead - trail;
+  const avgPause = mid.length ? midTotal/mid.length : 0;
+  const longPauses = mid.filter(s=>(s[1]-s[0])>1.0).length;
+
+  ctx.close();
+  return { total, answerSpan, pauseCount: mid.length, avgPause, longPauses };
+}
+
+function fmtTime(sec){
+  const m = Math.floor(sec/60), s = Math.round(sec%60);
+  return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
+
+function renderRecList(){
+  const keys = Object.keys(recordings);
+  recCount.textContent = keys.length;
+  recListEmpty.style.display = keys.length ? 'none' : 'block';
+  recList.innerHTML = '';
+  keys.forEach(key=>{
+    const r = recordings[key];
+    let verdictClass = 'v-good', verdictText = '적정 범위';
+    if(r.t){
+      if(r.answerSpan < r.t*0.7){ verdictClass='v-short'; verdictText='목표보다 짧아요'; }
+      else if(r.answerSpan > r.t*1.15){ verdictClass='v-long'; verdictText='목표보다 길어요'; }
+    }
+    const div = document.createElement('div');
+    div.className = 'recitem';
+    div.innerHTML = `
+      <div class="recitem-top">
+        <span class="recitem-q">${r.q}</span>
+        <span class="recitem-del" data-key="${key}">삭제</span>
+      </div>
+      <span class="recitem-verdict ${verdictClass}">${verdictText}</span>
+      <div class="recitem-stats">
+        답변시간 ${fmtTime(r.answerSpan)} ${r.t ? '(목표 '+r.t+'초)' : ''} · 멈춤 ${r.pauseCount}회 · 평균 ${r.avgPause.toFixed(2)}초
+        ${r.longPauses>0 ? '<br>⚠ 1초 넘는 멈춤 '+r.longPauses+'회 (버벅임 가능)' : ''}
+      </div>
+      <audio controls src="${r.url}"></audio>
+    `;
+    recList.appendChild(div);
+  });
+  recList.querySelectorAll('.recitem-del').forEach(el=>{
+    el.onclick = ()=>{ delete recordings[el.dataset.key]; renderRecList(); };
+  });
+}
 </script>
 </body>
 </html>
