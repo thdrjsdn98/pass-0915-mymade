@@ -299,6 +299,7 @@
     </div>
     <p id="recStatus" style="font-size:12px;color:var(--muted);text-align:center;margin:10px 0 0;"></p>
     <audio id="recPlayback" controls style="width:100%;margin-top:10px;display:none;"></audio>
+    <p id="liveTranscript" style="font-size:13px;color:var(--ink);margin-top:10px;display:none;background:var(--bg);border-radius:8px;padding:8px 10px;"></p>
   </div>
 
   <div class="timer-box" id="recListBox">
@@ -486,6 +487,13 @@ const recPlayback = document.getElementById('recPlayback');
 const recList = document.getElementById('recList');
 const recCount = document.getElementById('recCount');
 const recListEmpty = document.getElementById('recListEmpty');
+const liveTranscript = document.getElementById('liveTranscript');
+
+// Speech recognition (works in Chrome w/ real internet on the user's device; not supported in most Safari versions)
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let transcriptText = '';
+let recognitionSupported = !!SR;
 
 function keyFor(cat, i){ return cat + '|' + i; }
 
@@ -494,6 +502,10 @@ recBtn.onclick = async ()=>{
     try{
       const stream = await navigator.mediaDevices.getUserMedia({audio:true});
       audioChunks = [];
+      transcriptText = '';
+      liveTranscript.style.display = 'none';
+      liveTranscript.textContent = '';
+
       mediaRecorder = new MediaRecorder(stream);
       mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
       mediaRecorder.onstop = async ()=>{
@@ -507,7 +519,7 @@ recBtn.onclick = async ()=>{
           const stats = await analyzeAudio(blob);
           const item = data[currentCategory][order[idx]];
           const key = keyFor(currentCategory, order[idx]);
-          recordings[key] = { cat: currentCategory, q: item.q, t: item.t, url, ...stats };
+          recordings[key] = { cat: currentCategory, q: item.q, t: item.t, url, transcript: transcriptText.trim(), ...stats };
           renderRecList();
           recStatus.textContent = '분석 완료! 아래 재생 + 기록에서 확인하세요.';
         }catch(err){
@@ -515,6 +527,27 @@ recBtn.onclick = async ()=>{
         }
       };
       mediaRecorder.start();
+
+      if(recognitionSupported){
+        try{
+          recognition = new SR();
+          recognition.lang = 'ko-KR';
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.onresult = (e)=>{
+            let interim = '';
+            for(let i=e.resultIndex; i<e.results.length; i++){
+              if(e.results[i].isFinal) transcriptText += e.results[i][0].transcript;
+              else interim += e.results[i][0].transcript;
+            }
+            liveTranscript.style.display = 'block';
+            liveTranscript.textContent = '인식 중: ' + transcriptText + interim;
+          };
+          recognition.onerror = ()=>{ /* silently ignore, timing analysis still works */ };
+          recognition.start();
+        }catch(e){ recognitionSupported = false; }
+      }
+
       recording = true;
       recBtn.textContent = '⏹ 녹음 중지';
       recStatus.textContent = '녹음 중...';
@@ -523,6 +556,7 @@ recBtn.onclick = async ()=>{
     }
   } else {
     mediaRecorder.stop();
+    if(recognition){ try{ recognition.stop(); }catch(e){} }
     recording = false;
     recBtn.textContent = '🎙 녹음 시작';
   }
@@ -601,6 +635,7 @@ function renderRecList(){
         답변시간 ${fmtTime(r.answerSpan)} ${r.t ? '(목표 '+r.t+'초)' : ''} · 멈춤 ${r.pauseCount}회 · 평균 ${r.avgPause.toFixed(2)}초
         ${r.longPauses>0 ? '<br>⚠ 1초 넘는 멈춤 '+r.longPauses+'회 (버벅임 가능)' : ''}
       </div>
+      ${r.transcript ? '<div style="font-size:12.5px;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;">📝 인식된 내용: '+r.transcript+'</div>' : ''}
       <audio controls src="${r.url}"></audio>
     `;
     recList.appendChild(div);
